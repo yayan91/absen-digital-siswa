@@ -1,0 +1,2541 @@
+<!doctype html>
+<html lang="id" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Absen Digital Siswa V.1.0</title>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+    }
+    
+    /* Touch-friendly tap targets for mobile */
+    @media (max-width: 768px) {
+      button, input, select {
+        min-height: 44px;
+      }
+    }
+    
+    /* Smooth scrolling for better mobile UX */
+    html {
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ </head>
+ <body class="h-full">
+  <div id="app" class="h-full w-full overflow-auto bg-gradient-to-br from-blue-50 to-indigo-100"></div>
+  <script>
+    const defaultConfig = {
+      app_title: "ABSEN DIGITAL SISWA",
+      school_name: "Nama Sekolah Anda",
+      primary_color: "#3B82F6",
+      secondary_color: "#FFFFFF",
+      text_color: "#1F2937",
+      header_color: "#1E40AF",
+      button_color: "#10B981"
+    };
+
+    let config = { ...defaultConfig };
+
+    // Local Storage Keys
+    const STORAGE_KEYS = {
+      CLASSES: 'attendance_classes',
+      STUDENTS: 'attendance_students',
+      ATTENDANCE: 'attendance_records'
+    };
+
+    // Initialize data from localStorage
+    let classes = JSON.parse(localStorage.getItem(STORAGE_KEYS.CLASSES)) || [];
+    let students = JSON.parse(localStorage.getItem(STORAGE_KEYS.STUDENTS)) || [];
+    let attendanceRecords = JSON.parse(localStorage.getItem(STORAGE_KEYS.ATTENDANCE)) || [];
+
+    // Current view state
+    let currentView = 'home'; // home, classList, studentList, attendance, reports, settings
+    let selectedClassId = null;
+    let reportType = null; // 'class' or 'student'
+    let selectedStudentId = null;
+
+    // Settings data
+    let settings = JSON.parse(localStorage.getItem('app_settings'));
+    
+    // Inisialisasi settings jika belum ada atau password tidak ada
+    if (!settings || !settings.password) {
+      settings = {
+        schoolName: 'Nama Sekolah Anda',
+        teachers: [],
+        appTeacher: { name: '', nip: '' },
+        password: '123456'
+      };
+      localStorage.setItem('app_settings', JSON.stringify(settings));
+    }
+
+    function saveSettings() {
+      localStorage.setItem('app_settings', JSON.stringify(settings));
+    }
+
+    // Login state
+    let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+
+    function login(password) {
+      if (password === settings.password) {
+        isLoggedIn = true;
+        localStorage.setItem('isLoggedIn', 'true');
+        renderApp();
+        return true;
+      }
+      return false;
+    }
+
+    function logout() {
+      isLoggedIn = false;
+      localStorage.removeItem('isLoggedIn');
+      currentView = 'home';
+      renderApp();
+    }
+
+    function saveToLocalStorage() {
+      localStorage.setItem(STORAGE_KEYS.CLASSES, JSON.stringify(classes));
+      localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(students));
+      localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(attendanceRecords));
+    }
+
+    function generateId() {
+      return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    }
+
+    function getTodaySummary() {
+      const today = new Date().toISOString().split('T')[0];
+      
+      if (classes.length === 0) {
+        return `
+          <div class="text-center py-8" style="color: ${config.text_color}; opacity: 0.7">
+            <div class="text-5xl mb-3">📚</div>
+            <p>Belum ada kelas. Silakan tambahkan kelas terlebih dahulu.</p>
+          </div>
+        `;
+      }
+      
+      return classes.map(cls => {
+        const classStudents = getStudentsByClass(cls.id);
+        const todayAttendance = attendanceRecords.filter(r => r.classId === cls.id && r.date === today);
+        
+        const present = todayAttendance.filter(r => r.status === 'present').length;
+        const sick = todayAttendance.filter(r => r.status === 'sick').length;
+        const permit = todayAttendance.filter(r => r.status === 'permit').length;
+        const absent = todayAttendance.filter(r => r.status === 'absent').length;
+        const notYet = classStudents.length - todayAttendance.length;
+        
+        return `
+          <div class="border-2 rounded-lg p-4" style="border-color: ${config.primary_color}">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h4 class="text-lg font-bold" style="color: ${config.text_color}">${cls.name}</h4>
+                <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">${classStudents.length} Siswa</p>
+              </div>
+              ${todayAttendance.length === 0 ? `
+                <span class="px-3 py-1 rounded-full bg-gray-200 text-gray-700 text-sm font-medium">Belum Absen</span>
+              ` : todayAttendance.length === classStudents.length ? `
+                <span class="px-3 py-1 rounded-full text-white text-sm font-medium" style="background-color: ${config.button_color}">✓ Selesai</span>
+              ` : `
+                <span class="px-3 py-1 rounded-full bg-yellow-100 text-yellow-700 text-sm font-medium">Belum Lengkap</span>
+              `}
+            </div>
+            <div class="grid grid-cols-5 gap-2 text-center text-sm">
+              <div class="p-2 rounded bg-green-50">
+                <div class="font-bold text-lg text-green-600">${present}</div>
+                <div class="text-green-800">Hadir</div>
+              </div>
+              <div class="p-2 rounded bg-yellow-50">
+                <div class="font-bold text-lg text-yellow-600">${sick}</div>
+                <div class="text-yellow-800">Sakit</div>
+              </div>
+              <div class="p-2 rounded bg-orange-50">
+                <div class="font-bold text-lg text-orange-600">${permit}</div>
+                <div class="text-orange-800">Izin</div>
+              </div>
+              <div class="p-2 rounded bg-red-50">
+                <div class="font-bold text-lg text-red-600">${absent}</div>
+                <div class="text-red-800">Alpa</div>
+              </div>
+              <div class="p-2 rounded bg-gray-50">
+                <div class="font-bold text-lg text-gray-600">${notYet}</div>
+                <div class="text-gray-800">Belum</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function formatDate(date) {
+      const d = new Date(date);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    function addClass(name, grade, teacherId) {
+      const teacher = settings.teachers.find(t => t.id === teacherId);
+      const newClass = {
+        id: generateId(),
+        name: name,
+        grade: grade,
+        teacherId: teacherId || null,
+        teacherName: teacher ? teacher.name : '',
+        teacherNip: teacher ? teacher.nip : '',
+        createdAt: new Date().toISOString()
+      };
+      classes.push(newClass);
+      saveToLocalStorage();
+      return newClass;
+    }
+
+    function deleteClass(classId) {
+      classes = classes.filter(c => c.id !== classId);
+      students = students.filter(s => s.classId !== classId);
+      attendanceRecords = attendanceRecords.filter(a => a.classId !== classId);
+      saveToLocalStorage();
+    }
+
+    function addStudent(classId, name, nisn, gender) {
+      const newStudent = {
+        id: generateId(),
+        classId: classId,
+        name: name,
+        nisn: nisn,
+        gender: gender,
+        createdAt: new Date().toISOString()
+      };
+      students.push(newStudent);
+      saveToLocalStorage();
+      return newStudent;
+    }
+
+    function deleteStudent(studentId) {
+      students = students.filter(s => s.id !== studentId);
+      attendanceRecords = attendanceRecords.filter(a => a.studentId !== studentId);
+      saveToLocalStorage();
+    }
+
+    function getStudentsByClass(classId) {
+      return students.filter(s => s.classId === classId);
+    }
+
+    function saveAttendance(classId, date, attendanceData) {
+      const dateKey = new Date(date).toISOString().split('T')[0];
+      
+      attendanceData.forEach(item => {
+        const existingIndex = attendanceRecords.findIndex(
+          r => r.classId === classId && r.studentId === item.studentId && r.date === dateKey
+        );
+
+        const record = {
+          id: existingIndex >= 0 ? attendanceRecords[existingIndex].id : generateId(),
+          classId: classId,
+          studentId: item.studentId,
+          date: dateKey,
+          status: item.status,
+          note: item.note || '',
+          createdAt: existingIndex >= 0 ? attendanceRecords[existingIndex].createdAt : new Date().toISOString()
+        };
+
+        if (existingIndex >= 0) {
+          attendanceRecords[existingIndex] = record;
+        } else {
+          attendanceRecords.push(record);
+        }
+      });
+
+      saveToLocalStorage();
+    }
+
+    function getAttendanceByClassAndDate(classId, date) {
+      const dateKey = new Date(date).toISOString().split('T')[0];
+      return attendanceRecords.filter(r => r.classId === classId && r.date === dateKey);
+    }
+
+    function getCurrentDate() {
+      const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+      const now = new Date();
+      return `${days[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+    }
+
+    function renderApp() {
+      const app = document.getElementById('app');
+      
+      // Login screen
+      if (!isLoggedIn) {
+        app.innerHTML = `
+          <div class="min-h-full flex items-center justify-center p-6 bg-gradient-to-br from-blue-50 to-indigo-100">
+            <div class="max-w-md w-full">
+              <!-- Header Date -->
+              <div class="text-center mb-4">
+                <p class="text-sm font-medium" style="color: ${config.text_color}; opacity: 0.8">
+                  ${getCurrentDate()}
+                </p>
+              </div>
+
+              <div class="bg-white rounded-2xl shadow-2xl p-8">
+                <div class="text-center mb-6">
+                  <div class="text-6xl mb-4">🎓</div>
+                  <h1 class="text-3xl font-bold mb-2" style="color: ${config.header_color}">Absen Digital Siswa V.1.0</h1>
+                  <p class="text-lg font-medium" style="color: ${config.primary_color}">Sistem Absensi Digital</p>
+                </div>
+
+                <div class="mb-6 p-4 rounded-lg bg-blue-50 border-2 border-blue-200">
+                  <h3 class="font-bold text-blue-900 mb-2">• Fitur Aplikasi:</h3>
+                  <ul class="text-sm text-blue-800 space-y-1">
+                    <li>• Kelola data kelas dan siswa</li>
+                    <li>• Absensi harian yang mudah</li>
+                    <li>• Rekap absensi per kelas dan siswa</li>
+                    <li>• Export ke PDF & Excel</li>
+                    <li>• Pengaturan sekolah dan guru</li>
+                  </ul>
+                </div>
+
+                <form onsubmit="handleLogin(event)" class="space-y-4">
+                  <div>
+                    <label for="loginPassword" class="block mb-2 font-medium" style="color: ${config.text_color}">Masukkan Password</label>
+                    <input type="password" id="loginPassword" required class="w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 text-lg" style="border-color: ${config.primary_color}" placeholder="••••••">
+                  </div>
+                  <button type="submit" class="w-full py-3 rounded-lg font-bold text-white text-lg hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                    Masuk →
+                  </button>
+                  <p class="text-xs text-center" style="color: ${config.text_color}; opacity: 0.6">
+                    Password default: 123456 (dapat diubah di Pengaturan)
+                  </p>
+                </form>
+              </div>
+
+              <!-- Footer -->
+              <div class="text-center mt-6">
+                <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">
+                  Dikembangkan oleh <span class="font-bold">Muhammad Hasratul</span>
+                </p>
+                <p class="text-xs mt-1" style="color: ${config.text_color}; opacity: 0.6">
+                  © ${new Date().getFullYear()} - All Rights Reserved
+                </p>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+      
+      if (currentView === 'home') {
+        app.innerHTML = `
+          <div class="min-h-full p-6">
+            <!-- Header Date -->
+            <div class="max-w-4xl mx-auto mb-4 flex justify-between items-center">
+              <p class="text-sm font-medium" style="color: ${config.text_color}; opacity: 0.8">
+                📅 ${getCurrentDate()}
+              </p>
+              <button onclick="logout()" class="text-sm font-medium px-4 py-2 rounded-lg hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Keluar
+              </button>
+            </div>
+
+            <header class="text-center mb-8 bg-white rounded-xl shadow-lg p-8">
+              <h1 class="text-5xl font-bold mb-2" style="color: ${config.header_color}">${config.app_title}</h1>
+              <p class="text-xl" style="color: ${config.text_color}">${settings.schoolName}</p>
+            </header>
+
+            <div class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+              <button onclick="navigateTo('classList')" class="bg-white rounded-xl shadow-lg p-8 hover:shadow-xl transition-all transform hover:scale-105" style="border-left: 6px solid ${config.primary_color}">
+                <div class="text-6xl mb-4">📚</div>
+                <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Kelola Kelas</h2>
+                <p style="color: ${config.text_color}; opacity: 0.7">Tambah dan kelola data kelas</p>
+              </button>
+
+              <button onclick="navigateTo('attendance')" class="bg-white rounded-xl shadow-lg p-8 hover:shadow-xl transition-all transform hover:scale-105" style="border-left: 6px solid ${config.button_color}">
+                <div class="text-6xl mb-4">✅</div>
+                <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Absen Siswa</h2>
+                <p style="color: ${config.text_color}; opacity: 0.7">Lakukan absensi harian</p>
+              </button>
+
+              <button onclick="navigateTo('reports')" class="bg-white rounded-xl shadow-lg p-8 hover:shadow-xl transition-all transform hover:scale-105" style="border-left: 6px solid #8B5CF6">
+                <div class="text-6xl mb-4">📊</div>
+                <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Rekap Absensi</h2>
+                <p style="color: ${config.text_color}; opacity: 0.7">Lihat dan download laporan</p>
+              </button>
+
+              <button onclick="navigateTo('settings')" class="bg-white rounded-xl shadow-lg p-8 hover:shadow-xl transition-all transform hover:scale-105" style="border-left: 6px solid #6366F1">
+                <div class="text-6xl mb-4">🔧</div>
+                <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Pengaturan</h2>
+                <p style="color: ${config.text_color}; opacity: 0.7">Kelola sekolah dan guru</p>
+              </button>
+            </div>
+
+            <div class="max-w-4xl mx-auto mt-8 bg-white rounded-xl shadow-lg p-6">
+              <h3 class="text-2xl font-bold mb-4" style="color: ${config.text_color}">📅 Kehadiran Hari Ini</h3>
+              <div id="todaySummary" class="space-y-3">
+                ${getTodaySummary()}
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="max-w-4xl mx-auto mt-8 text-center">
+              <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">
+                Dikembangkan oleh <span class="font-bold">Muhammad Hasratul</span>
+              </p>
+              <p class="text-xs mt-1" style="color: ${config.text_color}; opacity: 0.6">
+                © ${new Date().getFullYear()} - All Rights Reserved
+              </p>
+            </div>
+          </div>
+        `;
+      } else if (currentView === 'classList') {
+        renderClassList();
+      } else if (currentView === 'studentList') {
+        renderStudentList();
+      } else if (currentView === 'attendance') {
+        renderAttendance();
+      } else if (currentView === 'reports') {
+        renderReports();
+      } else if (currentView === 'settings') {
+        renderSettings();
+      }
+    }
+
+    function renderClassList() {
+      const app = document.getElementById('app');
+      
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="navigateTo('home')" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Kelola Kelas</h2>
+              <button onclick="showAddClassForm()" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                + Tambah Kelas
+              </button>
+            </div>
+
+            <div id="classFormContainer" class="hidden mb-6 bg-white rounded-xl shadow-lg p-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Tambah Kelas Baru</h3>
+              <form onsubmit="handleAddClass(event)" class="space-y-4">
+                <div>
+                  <label for="className" class="block mb-2 font-medium" style="color: ${config.text_color}">Nama Kelas</label>
+                  <input type="text" id="className" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Contoh: 7A">
+                </div>
+                <div>
+                  <label for="classGrade" class="block mb-2 font-medium" style="color: ${config.text_color}">Tingkat</label>
+                  <select id="classGrade" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                    <option value="7">Kelas 7</option>
+                    <option value="8">Kelas 8</option>
+                    <option value="9">Kelas 9</option>
+                    <option value="10">Kelas 10</option>
+                    <option value="11">Kelas 11</option>
+                    <option value="12">Kelas 12</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="classTeacher" class="block mb-2 font-medium" style="color: ${config.text_color}">Wali Kelas</label>
+                  <select id="classTeacher" class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                    <option value="">-- Pilih Wali Kelas --</option>
+                    ${settings.teachers.map(teacher => `
+                      <option value="${teacher.id}">${teacher.name} (NIP: ${teacher.nip})</option>
+                    `).join('')}
+                  </select>
+                  ${settings.teachers.length === 0 ? `
+                    <p class="text-sm mt-1" style="color: ${config.text_color}; opacity: 0.7">
+                      Belum ada data guru. <a href="#" onclick="event.preventDefault(); navigateTo('settings')" class="underline font-medium" style="color: ${config.primary_color}">Tambah guru</a> di menu Pengaturan.
+                    </p>
+                  ` : ''}
+                </div>
+                <div class="flex gap-3">
+                  <button type="submit" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                    Simpan
+                  </button>
+                  <button type="button" onclick="hideAddClassForm()" class="px-6 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                    Batal
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div id="classListContainer" class="space-y-4">
+              ${classes.length === 0 ? `
+                <div class="text-center py-12 bg-white rounded-xl shadow-lg">
+                  <div class="text-6xl mb-4">📚</div>
+                  <p class="text-xl" style="color: ${config.text_color}">Belum ada kelas. Tambahkan kelas pertama Anda!</p>
+                </div>
+              ` : classes.map(cls => {
+                const classStudents = getStudentsByClass(cls.id);
+                return `
+                  <div class="bg-white rounded-xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                      <div class="flex-1">
+                        <h3 class="text-xl md:text-2xl font-bold mb-1" style="color: ${config.text_color}">${cls.name}</h3>
+                        <p class="text-sm md:text-base" style="color: ${config.text_color}; opacity: 0.7">Tingkat ${cls.grade} • ${classStudents.length} Siswa</p>
+                        ${cls.teacherName ? `
+                          <p class="mt-2 text-sm md:text-base" style="color: ${config.text_color}; opacity: 0.9">
+                            <span class="font-medium">👨 Wali Kelas:</span> ${cls.teacherName}
+                            ${cls.teacherNip ? ` <span class="text-xs md:text-sm" style="opacity: 0.7">(NIP: ${cls.teacherNip})</span>` : ''}
+                          </p>
+                        ` : ''}
+                      </div>
+                      <div class="flex gap-2 md:gap-3">
+                        <button onclick="viewStudents('${cls.id}')" class="flex-1 md:flex-initial px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.primary_color}">
+                          Siswa
+                        </button>
+                        <button onclick="confirmDeleteClass('${cls.id}')" class="flex-1 md:flex-initial px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors">
+                          Hapus
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderStudentList() {
+      const app = document.getElementById('app');
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      const classStudents = getStudentsByClass(selectedClassId);
+      
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="navigateTo('classList')" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Siswa Kelas ${currentClass.name}</h2>
+              <div class="flex gap-2">
+                <button onclick="showAddStudentForm()" class="px-4 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                  + Manual
+                </button>
+                <button onclick="showImportExcelForm()" class="px-4 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.primary_color}">
+                  📊 Excel
+                </button>
+              </div>
+            </div>
+
+            <div id="studentFormContainer" class="hidden mb-6 bg-white rounded-xl shadow-lg p-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Tambah Siswa Baru</h3>
+              <form onsubmit="handleAddStudent(event)" class="space-y-4">
+                <div>
+                  <label for="studentName" class="block mb-2 font-medium" style="color: ${config.text_color}">Nama Lengkap</label>
+                  <input type="text" id="studentName" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Contoh: Ahmad Wijaya">
+                </div>
+                <div>
+                  <label for="studentNisn" class="block mb-2 font-medium" style="color: ${config.text_color}">NISN</label>
+                  <input type="text" id="studentNisn" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Contoh: 0012345678">
+                </div>
+                <div>
+                  <label for="studentGender" class="block mb-2 font-medium" style="color: ${config.text_color}">Jenis Kelamin</label>
+                  <select id="studentGender" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                    <option value="L">Laki-laki</option>
+                    <option value="P">Perempuan</option>
+                  </select>
+                </div>
+                <div class="flex gap-3">
+                  <button type="submit" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                    Simpan
+                  </button>
+                  <button type="button" onclick="hideAddStudentForm()" class="px-6 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                    Batal
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div id="importExcelContainer" class="hidden mb-6 bg-white rounded-xl shadow-lg p-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Import Siswa dari Excel</h3>
+              <div class="mb-4 p-4 rounded-lg bg-blue-50 border border-blue-200">
+                <p class="text-sm font-medium text-blue-900 mb-2">📋 Format Excel:</p>
+                <ul class="text-sm text-blue-800 space-y-1 ml-4">
+                  <li>• Kolom A: Nama Lengkap</li>
+                  <li>• Kolom B: NISN</li>
+                  <li>• Kolom C: Jenis Kelamin (L/P)</li>
+                  <li>• Baris 1 (header) akan dilewati</li>
+                </ul>
+                <button onclick="downloadTemplateExcel()" class="mt-3 px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90" style="background-color: ${config.primary_color}">
+                  📥 Download Template
+                </button>
+              </div>
+              <form onsubmit="handleImportExcel(event)" class="space-y-4">
+                <div>
+                  <label for="excelFile" class="block mb-2 font-medium" style="color: ${config.text_color}">Pilih File Excel</label>
+                  <input type="file" id="excelFile" accept=".xlsx,.xls" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                </div>
+                <div id="previewContainer" class="hidden">
+                  <p class="font-medium mb-2" style="color: ${config.text_color}">Preview Data:</p>
+                  <div id="previewContent" class="max-h-60 overflow-y-auto border-2 rounded-lg p-3" style="border-color: ${config.primary_color}"></div>
+                </div>
+                <div class="flex gap-3">
+                  <button type="submit" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                    Import
+                  </button>
+                  <button type="button" onclick="hideImportExcelForm()" class="px-6 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                    Batal
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div id="studentListContainer" class="space-y-3">
+              ${classStudents.length === 0 ? `
+                <div class="text-center py-12 bg-white rounded-xl shadow-lg">
+                  <div class="text-6xl mb-4">👥</div>
+                  <p class="text-xl" style="color: ${config.text_color}">Belum ada siswa. Tambahkan siswa pertama!</p>
+                </div>
+              ` : classStudents.map((student, index) => `
+                <div class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow flex items-center justify-between">
+                  <div class="flex items-center gap-4">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style="background-color: ${config.primary_color}">
+                      ${index + 1}
+                    </div>
+                    <div>
+                      <h4 class="font-bold text-lg" style="color: ${config.text_color}">${student.name}</h4>
+                      <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">NISN: ${student.nisn} • ${student.gender === 'L' ? '👨 Laki-laki' : '👩 Perempuan'}</p>
+                    </div>
+                  </div>
+                  <button onclick="confirmDeleteStudent('${student.id}')" class="px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors">
+                    Hapus
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderAttendance() {
+      const app = document.getElementById('app');
+      
+      if (!selectedClassId) {
+        app.innerHTML = `
+          <div class="min-h-full p-6">
+            <div class="max-w-4xl mx-auto">
+              <div class="flex items-center justify-between mb-6">
+                <button onclick="navigateTo('home')" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                  ← Kembali
+                </button>
+                <h2 class="text-3xl font-bold" style="color: ${config.header_color}">ABSEN DIGITAL SISWA</h2>
+                <div style="width: 140px"></div>
+              </div>
+
+              <div class="space-y-4">
+                ${classes.length === 0 ? `
+                  <div class="text-center py-12 bg-white rounded-xl shadow-lg">
+                    <div class="text-6xl mb-4">📚</div>
+                    <p class="text-xl mb-4" style="color: ${config.text_color}">Belum ada kelas tersedia</p>
+                    <button onclick="navigateTo('classList')" class="px-6 py-3 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.primary_color}">
+                      Kelola Kelas
+                    </button>
+                  </div>
+                ` : `
+                  <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Pilih Kelas</h3>
+                  </div>
+                  ${classes.map(cls => {
+                    const classStudents = getStudentsByClass(cls.id);
+                    return `
+                      <button onclick="selectClassForAttendance('${cls.id}')" class="w-full bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left">
+                        <div class="flex items-center justify-between">
+                          <div>
+                            <h3 class="text-2xl font-bold mb-1" style="color: ${config.text_color}">${cls.name}</h3>
+                            <p style="color: ${config.text_color}; opacity: 0.7">Tingkat ${cls.grade} • ${classStudents.length} Siswa</p>
+                          </div>
+                          <div class="text-3xl">→</div>
+                        </div>
+                      </button>
+                    `;
+                  }).join('')}
+                `}
+              </div>
+            </div>
+          </div>
+        `;
+      } else {
+        renderAttendanceForm();
+      }
+    }
+
+    let selectedAttendanceDate = new Date().toISOString().split('T')[0];
+
+    function renderAttendanceForm() {
+      const app = document.getElementById('app');
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      const classStudents = getStudentsByClass(selectedClassId);
+      const todayAttendance = getAttendanceByClassAndDate(selectedClassId, selectedAttendanceDate);
+      
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="backToClassSelection()" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <div class="text-center">
+                <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Absen Kelas ${currentClass.name}</h2>
+                <div class="flex items-center justify-center gap-3 mt-2">
+                  <label for="attendanceDate" class="font-medium" style="color: ${config.text_color}">Tanggal:</label>
+                  <input type="date" id="attendanceDate" value="${selectedAttendanceDate}" onchange="changeAttendanceDate(this.value)" class="px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                </div>
+              </div>
+              <button onclick="saveAttendanceData()" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                💾 Simpan
+              </button>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <div class="flex gap-6 text-center">
+                <div class="flex-1">
+                  <div class="text-3xl font-bold" style="color: ${config.button_color}" id="presentCount">0</div>
+                  <div style="color: ${config.text_color}">Hadir</div>
+                </div>
+                <div class="flex-1">
+                  <div class="text-3xl font-bold text-yellow-500" id="sickCount">0</div>
+                  <div style="color: ${config.text_color}">Sakit</div>
+                </div>
+                <div class="flex-1">
+                  <div class="text-3xl font-bold text-orange-500" id="permitCount">0</div>
+                  <div style="color: ${config.text_color}">Izin</div>
+                </div>
+                <div class="flex-1">
+                  <div class="text-3xl font-bold text-red-500" id="absentCount">0</div>
+                  <div style="color: ${config.text_color}">Alpa</div>
+                </div>
+              </div>
+            </div>
+
+            ${classStudents.length === 0 ? `
+              <div class="text-center py-12 bg-white rounded-xl shadow-lg">
+                <div class="text-6xl mb-4">👥</div>
+                <p class="text-xl mb-4" style="color: ${config.text_color}">Belum ada siswa di kelas ini</p>
+                <button onclick="viewStudents('${selectedClassId}')" class="px-6 py-3 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.primary_color}">
+                  Tambah Siswa
+                </button>
+              </div>
+            ` : `
+              <div id="attendanceList" class="space-y-3">
+                ${classStudents.map((student, index) => {
+                  const existingRecord = todayAttendance.find(r => r.studentId === student.id);
+                  const status = existingRecord ? existingRecord.status : 'present';
+                  const note = existingRecord ? existingRecord.note : '';
+                  
+                  return `
+                    <div class="bg-white rounded-lg shadow p-4" data-student-id="${student.id}">
+                      <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-4">
+                          <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style="background-color: ${config.primary_color}">
+                            ${index + 1}
+                          </div>
+                          <div>
+                            <h4 class="font-bold text-lg" style="color: ${config.text_color}">${student.name}</h4>
+                            <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">NISN: ${student.nisn} • ${student.gender === 'L' ? '👨' : '👩'}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="grid grid-cols-2 md:flex gap-2 mb-2">
+                        <button onclick="setAttendanceStatus('${student.id}', 'present')" class="py-2 px-2 md:flex-1 text-sm md:text-base rounded-lg font-medium transition-all status-btn ${status === 'present' ? 'text-white' : 'bg-gray-100'}" style="${status === 'present' ? `background-color: ${config.button_color}` : ''}">
+                          ✓ Hadir
+                        </button>
+                        <button onclick="setAttendanceStatus('${student.id}', 'sick')" class="py-2 px-2 md:flex-1 text-sm md:text-base rounded-lg font-medium transition-all status-btn ${status === 'sick' ? 'bg-yellow-500 text-white' : 'bg-gray-100'}">
+                          🤒 Sakit
+                        </button>
+                        <button onclick="setAttendanceStatus('${student.id}', 'permit')" class="py-2 px-2 md:flex-1 text-sm md:text-base rounded-lg font-medium transition-all status-btn ${status === 'permit' ? 'bg-orange-500 text-white' : 'bg-gray-100'}">
+                          📝 Izin
+                        </button>
+                        <button onclick="setAttendanceStatus('${student.id}', 'absent')" class="py-2 px-2 md:flex-1 text-sm md:text-base rounded-lg font-medium transition-all status-btn ${status === 'absent' ? 'bg-red-500 text-white' : 'bg-gray-100'}">
+                          ✗ Alpa
+                        </button>
+                      </div>
+                      <input type="text" placeholder="Catatan (opsional)" value="${note}" onchange="setAttendanceNote('${student.id}', this.value)" class="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+
+      updateAttendanceCounts();
+    }
+
+    let attendanceData = {};
+
+    function setAttendanceStatus(studentId, status) {
+      if (!attendanceData[studentId]) {
+        attendanceData[studentId] = {};
+      }
+      attendanceData[studentId].status = status;
+
+      const studentCard = document.querySelector(`[data-student-id="${studentId}"]`);
+      const buttons = studentCard.querySelectorAll('.status-btn');
+      
+      buttons.forEach(btn => {
+        btn.classList.remove('text-white', 'bg-yellow-500', 'bg-orange-500', 'bg-red-500');
+        btn.classList.add('bg-gray-100');
+        btn.style.backgroundColor = '';
+      });
+
+      const activeBtn = Array.from(buttons).find(btn => {
+        const btnText = btn.textContent.toLowerCase();
+        return (status === 'present' && btnText.includes('hadir')) ||
+               (status === 'sick' && btnText.includes('sakit')) ||
+               (status === 'permit' && btnText.includes('izin')) ||
+               (status === 'absent' && btnText.includes('alpa'));
+      });
+
+      if (activeBtn) {
+        activeBtn.classList.remove('bg-gray-100');
+        activeBtn.classList.add('text-white');
+        
+        if (status === 'present') {
+          activeBtn.style.backgroundColor = config.button_color;
+        } else if (status === 'sick') {
+          activeBtn.classList.add('bg-yellow-500');
+        } else if (status === 'permit') {
+          activeBtn.classList.add('bg-orange-500');
+        } else if (status === 'absent') {
+          activeBtn.classList.add('bg-red-500');
+        }
+      }
+
+      updateAttendanceCounts();
+    }
+
+    function setAttendanceNote(studentId, note) {
+      if (!attendanceData[studentId]) {
+        attendanceData[studentId] = { status: 'present' };
+      }
+      attendanceData[studentId].note = note;
+    }
+
+    function updateAttendanceCounts() {
+      const classStudents = getStudentsByClass(selectedClassId);
+      const counts = { present: 0, sick: 0, permit: 0, absent: 0 };
+
+      classStudents.forEach(student => {
+        const status = attendanceData[student.id]?.status || 'present';
+        counts[status]++;
+      });
+
+      const presentEl = document.getElementById('presentCount');
+      const sickEl = document.getElementById('sickCount');
+      const permitEl = document.getElementById('permitCount');
+      const absentEl = document.getElementById('absentCount');
+
+      if (presentEl) presentEl.textContent = counts.present;
+      if (sickEl) sickEl.textContent = counts.sick;
+      if (permitEl) permitEl.textContent = counts.permit;
+      if (absentEl) absentEl.textContent = counts.absent;
+    }
+
+    function changeAttendanceDate(newDate) {
+      selectedAttendanceDate = newDate;
+      attendanceData = {};
+      
+      const dateAttendance = getAttendanceByClassAndDate(selectedClassId, selectedAttendanceDate);
+      dateAttendance.forEach(record => {
+        attendanceData[record.studentId] = {
+          status: record.status,
+          note: record.note
+        };
+      });
+      
+      renderAttendanceForm();
+    }
+
+    function saveAttendanceData() {
+      const classStudents = getStudentsByClass(selectedClassId);
+      const selectedDate = new Date(selectedAttendanceDate);
+      const dataToSave = [];
+
+      classStudents.forEach(student => {
+        const data = attendanceData[student.id] || { status: 'present', note: '' };
+        dataToSave.push({
+          studentId: student.id,
+          status: data.status,
+          note: data.note || ''
+        });
+      });
+
+      saveAttendance(selectedClassId, selectedDate, dataToSave);
+
+      const successMsg = document.createElement('div');
+      successMsg.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg';
+      successMsg.textContent = '✓ Absensi berhasil disimpan!';
+      document.body.appendChild(successMsg);
+
+      setTimeout(() => {
+        successMsg.remove();
+      }, 3000);
+    }
+
+    function navigateTo(view) {
+      currentView = view;
+      if (view !== 'attendance') {
+        selectedClassId = null;
+        attendanceData = {};
+      }
+      renderApp();
+    }
+
+    function showAddClassForm() {
+      document.getElementById('classFormContainer').classList.remove('hidden');
+    }
+
+    function hideAddClassForm() {
+      document.getElementById('classFormContainer').classList.add('hidden');
+      document.getElementById('className').value = '';
+      document.getElementById('classGrade').value = '7';
+    }
+
+    function handleAddClass(event) {
+      event.preventDefault();
+      const name = document.getElementById('className').value.trim();
+      const grade = document.getElementById('classGrade').value;
+      const teacherId = document.getElementById('classTeacher').value;
+      
+      if (name) {
+        addClass(name, grade, teacherId);
+        hideAddClassForm();
+        renderClassList();
+      }
+    }
+
+    function confirmDeleteClass(classId) {
+      const cls = classes.find(c => c.id === classId);
+      const classStudents = getStudentsByClass(classId);
+      
+      const confirmMsg = document.createElement('div');
+      confirmMsg.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      confirmMsg.innerHTML = `
+        <div class="bg-white rounded-xl p-6 max-w-md mx-4">
+          <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Hapus Kelas ${cls.name}?</h3>
+          <p class="mb-6" style="color: ${config.text_color}">Kelas ini memiliki ${classStudents.length} siswa. Semua data siswa dan absensi akan terhapus.</p>
+          <div class="flex gap-3">
+            <button onclick="executeDeleteClass('${classId}')" class="flex-1 px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600">
+              Hapus
+            </button>
+            <button onclick="this.closest('.fixed').remove()" class="flex-1 px-4 py-2 rounded-lg font-medium" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+              Batal
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(confirmMsg);
+    }
+
+    function executeDeleteClass(classId) {
+      deleteClass(classId);
+      document.querySelector('.fixed.inset-0').remove();
+      renderClassList();
+    }
+
+    function viewStudents(classId) {
+      selectedClassId = classId;
+      currentView = 'studentList';
+      renderApp();
+    }
+
+    function showAddStudentForm() {
+      document.getElementById('studentFormContainer').classList.remove('hidden');
+    }
+
+    function hideAddStudentForm() {
+      document.getElementById('studentFormContainer').classList.add('hidden');
+      document.getElementById('studentName').value = '';
+      document.getElementById('studentNisn').value = '';
+    }
+
+    function showImportExcelForm() {
+      document.getElementById('studentFormContainer').classList.add('hidden');
+      document.getElementById('importExcelContainer').classList.remove('hidden');
+      
+      const fileInput = document.getElementById('excelFile');
+      fileInput.addEventListener('change', previewExcelData);
+    }
+
+    function hideImportExcelForm() {
+      document.getElementById('importExcelContainer').classList.add('hidden');
+      document.getElementById('excelFile').value = '';
+      document.getElementById('previewContainer').classList.add('hidden');
+    }
+
+    let importedStudentsData = [];
+
+    function previewExcelData(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+          
+          // Skip header row and process data
+          importedStudentsData = [];
+          const previewHTML = [];
+          
+          for (let i = 1; i < jsonData.length; i++) {
+            const row = jsonData[i];
+            if (row[0] && row[1]) { // Name and NISN must exist
+              const name = String(row[0]).trim();
+              const nisn = String(row[1]).trim();
+              const gender = String(row[2] || 'L').toUpperCase().trim();
+              
+              if (gender !== 'L' && gender !== 'P') {
+                previewHTML.push(`<div class="p-2 bg-red-50 rounded text-sm text-red-700">❌ Baris ${i + 1}: ${name} - Jenis kelamin harus L atau P</div>`);
+                continue;
+              }
+              
+              importedStudentsData.push({ name, nisn, gender });
+              previewHTML.push(`<div class="p-2 bg-green-50 rounded text-sm">✓ ${name} - NISN: ${nisn} - ${gender === 'L' ? 'Laki-laki' : 'Perempuan'}</div>`);
+            }
+          }
+          
+          if (importedStudentsData.length > 0) {
+            document.getElementById('previewContainer').classList.remove('hidden');
+            document.getElementById('previewContent').innerHTML = previewHTML.join('');
+          } else {
+            showNotification('⚠️ Tidak ada data valid di file Excel!');
+          }
+        } catch (error) {
+          showNotification('❌ Gagal membaca file Excel!');
+          console.error(error);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function handleImportExcel(event) {
+      event.preventDefault();
+      
+      if (importedStudentsData.length === 0) {
+        showNotification('⚠️ Tidak ada data untuk diimport!');
+        return;
+      }
+      
+      let successCount = 0;
+      importedStudentsData.forEach(studentData => {
+        addStudent(selectedClassId, studentData.name, studentData.nisn, studentData.gender);
+        successCount++;
+      });
+      
+      showNotification(`✓ Berhasil import ${successCount} siswa!`);
+      hideImportExcelForm();
+      renderStudentList();
+    }
+
+    function downloadTemplateExcel() {
+      const wb = XLSX.utils.book_new();
+      
+      const wsData = [
+        ['Nama Lengkap', 'NISN', 'Jenis Kelamin'],
+        ['Ahmad Wijaya', '0012345678', 'L'],
+        ['Siti Nurhaliza', '0012345679', 'P'],
+        ['Budi Santoso', '0012345680', 'L']
+      ];
+      
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      
+      ws['!cols'] = [
+        { wch: 25 },
+        { wch: 15 },
+        { wch: 15 }
+      ];
+      
+      XLSX.utils.book_append_sheet(wb, ws, 'Data Siswa');
+      XLSX.writeFile(wb, 'Template_Import_Siswa.xlsx');
+      
+      showNotification('✓ Template Excel berhasil didownload!');
+    }
+
+    function handleAddStudent(event) {
+      event.preventDefault();
+      const name = document.getElementById('studentName').value.trim();
+      const nisn = document.getElementById('studentNisn').value.trim();
+      const gender = document.getElementById('studentGender').value;
+      
+      if (name && nisn && gender) {
+        addStudent(selectedClassId, name, nisn, gender);
+        hideAddStudentForm();
+        renderStudentList();
+      }
+    }
+
+    function confirmDeleteStudent(studentId) {
+      const student = students.find(s => s.id === studentId);
+      
+      const confirmMsg = document.createElement('div');
+      confirmMsg.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      confirmMsg.innerHTML = `
+        <div class="bg-white rounded-xl p-6 max-w-md mx-4">
+          <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Hapus Siswa?</h3>
+          <p class="mb-6" style="color: ${config.text_color}">Apakah Anda yakin ingin menghapus ${student.name}? Semua data absensi akan terhapus.</p>
+          <div class="flex gap-3">
+            <button onclick="executeDeleteStudent('${studentId}')" class="flex-1 px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600">
+              Hapus
+            </button>
+            <button onclick="this.closest('.fixed').remove()" class="flex-1 px-4 py-2 rounded-lg font-medium" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+              Batal
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(confirmMsg);
+    }
+
+    function executeDeleteStudent(studentId) {
+      deleteStudent(studentId);
+      document.querySelector('.fixed.inset-0').remove();
+      renderStudentList();
+    }
+
+    function selectClassForAttendance(classId) {
+      selectedClassId = classId;
+      attendanceData = {};
+      
+      const today = new Date();
+      const todayAttendance = getAttendanceByClassAndDate(classId, today);
+      
+      todayAttendance.forEach(record => {
+        attendanceData[record.studentId] = {
+          status: record.status,
+          note: record.note
+        };
+      });
+      
+      renderAttendance();
+    }
+
+    function backToClassSelection() {
+      selectedClassId = null;
+      attendanceData = {};
+      renderAttendance();
+    }
+
+    function renderReports() {
+      const app = document.getElementById('app');
+      
+      if (!reportType) {
+        app.innerHTML = `
+          <div class="min-h-full p-6">
+            <div class="max-w-4xl mx-auto">
+              <div class="flex items-center justify-between mb-6">
+                <button onclick="navigateTo('home')" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                  ← Kembali
+                </button>
+                <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Rekap Absensi</h2>
+                <div style="width: 140px"></div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <button onclick="selectReportType('class')" class="bg-white rounded-xl shadow-lg p-8 hover:shadow-xl transition-all transform hover:scale-105">
+                  <div class="text-6xl mb-4">📚</div>
+                  <h3 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Rekap Per Kelas</h3>
+                  <p style="color: ${config.text_color}; opacity: 0.7">Lihat rekap absensi seluruh siswa dalam kelas</p>
+                </button>
+
+                <button onclick="selectReportType('student')" class="bg-white rounded-xl shadow-lg p-8 hover:shadow-xl transition-all transform hover:scale-105">
+                  <div class="text-6xl mb-4">👤</div>
+                  <h3 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Rekap Per Siswa</h3>
+                  <p style="color: ${config.text_color}; opacity: 0.7">Lihat rekap absensi individual siswa</p>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      } else if (reportType === 'class' && !selectedClassId) {
+        renderClassSelectionForReport();
+      } else if (reportType === 'class' && selectedClassId) {
+        renderClassReport();
+      } else if (reportType === 'student' && !selectedClassId) {
+        renderClassSelectionForStudentReport();
+      } else if (reportType === 'student' && selectedClassId && !selectedStudentId) {
+        renderStudentSelectionForReport();
+      } else if (reportType === 'student' && selectedStudentId) {
+        renderStudentReport();
+      }
+    }
+
+    function selectReportType(type) {
+      reportType = type;
+      renderReports();
+    }
+
+    function renderClassSelectionForReport() {
+      const app = document.getElementById('app');
+      
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="backToReportSelection()" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Pilih Kelas</h2>
+              <div style="width: 140px"></div>
+            </div>
+
+            <div class="space-y-4">
+              ${classes.length === 0 ? `
+                <div class="text-center py-12 bg-white rounded-xl shadow-lg">
+                  <div class="text-6xl mb-4">📚</div>
+                  <p class="text-xl" style="color: ${config.text_color}">Belum ada kelas tersedia</p>
+                </div>
+              ` : classes.map(cls => {
+                const classStudents = getStudentsByClass(cls.id);
+                return `
+                  <button onclick="selectClassForReport('${cls.id}')" class="w-full bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <h3 class="text-2xl font-bold mb-1" style="color: ${config.text_color}">${cls.name}</h3>
+                        <p style="color: ${config.text_color}; opacity: 0.7">Tingkat ${cls.grade} • ${classStudents.length} Siswa</p>
+                      </div>
+                      <div class="text-3xl">→</div>
+                    </div>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderClassSelectionForStudentReport() {
+      const app = document.getElementById('app');
+      
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="backToReportSelection()" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Pilih Kelas</h2>
+              <div style="width: 140px"></div>
+            </div>
+
+            <div class="space-y-4">
+              ${classes.length === 0 ? `
+                <div class="text-center py-12 bg-white rounded-xl shadow-lg">
+                  <div class="text-6xl mb-4">📚</div>
+                  <p class="text-xl" style="color: ${config.text_color}">Belum ada kelas tersedia</p>
+                </div>
+              ` : classes.map(cls => {
+                const classStudents = getStudentsByClass(cls.id);
+                return `
+                  <button onclick="selectClassForStudentReport('${cls.id}')" class="w-full bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <h3 class="text-2xl font-bold mb-1" style="color: ${config.text_color}">${cls.name}</h3>
+                        <p style="color: ${config.text_color}; opacity: 0.7">Tingkat ${cls.grade} • ${classStudents.length} Siswa</p>
+                      </div>
+                      <div class="text-3xl">→</div>
+                    </div>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function selectClassForReport(classId) {
+      selectedClassId = classId;
+      renderReports();
+    }
+
+    function selectClassForStudentReport(classId) {
+      selectedClassId = classId;
+      renderReports();
+    }
+
+    function renderStudentSelectionForReport() {
+      const app = document.getElementById('app');
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      const classStudents = getStudentsByClass(selectedClassId);
+      
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="backToClassSelectionStudent()" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Pilih Siswa - ${currentClass.name}</h2>
+              <div style="width: 140px"></div>
+            </div>
+
+            <div class="space-y-3">
+              ${classStudents.length === 0 ? `
+                <div class="text-center py-12 bg-white rounded-xl shadow-lg">
+                  <div class="text-6xl mb-4">👥</div>
+                  <p class="text-xl" style="color: ${config.text_color}">Belum ada siswa di kelas ini</p>
+                </div>
+              ` : classStudents.map((student, index) => `
+                <button onclick="selectStudentForReport('${student.id}')" class="w-full bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow text-left">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                      <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style="background-color: ${config.primary_color}">
+                        ${index + 1}
+                      </div>
+                      <div>
+                        <h4 class="font-bold text-lg" style="color: ${config.text_color}">${student.name}</h4>
+                        <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">NISN: ${student.nisn} • ${student.gender === 'L' ? '👨 Laki-laki' : '👩 Perempuan'}</p>
+                      </div>
+                    </div>
+                    <div class="text-2xl">→</div>
+                  </div>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function selectStudentForReport(studentId) {
+      selectedStudentId = studentId;
+      renderReports();
+    }
+
+    let reportStartDate = '';
+    let reportEndDate = '';
+
+    function renderClassReport() {
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      const classStudents = getStudentsByClass(selectedClassId);
+      let classAttendance = attendanceRecords.filter(r => r.classId === selectedClassId);
+      
+      // Filter by date range if set
+      if (reportStartDate && reportEndDate) {
+        classAttendance = classAttendance.filter(r => r.date >= reportStartDate && r.date <= reportEndDate);
+      }
+      
+      // Get unique dates
+      const dates = [...new Set(classAttendance.map(r => r.date))].sort().reverse();
+      
+      // Calculate statistics per student
+      const studentStats = classStudents.map(student => {
+        const studentRecords = classAttendance.filter(r => r.studentId === student.id);
+        const present = studentRecords.filter(r => r.status === 'present').length;
+        const sick = studentRecords.filter(r => r.status === 'sick').length;
+        const permit = studentRecords.filter(r => r.status === 'permit').length;
+        const absent = studentRecords.filter(r => r.status === 'absent').length;
+        const total = studentRecords.length;
+        const percentage = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
+        
+        return { student, present, sick, permit, absent, total, percentage };
+      });
+
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-6xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="backToClassSelection()" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Rekap Kelas ${currentClass.name}</h2>
+              <div class="flex gap-2">
+                <button onclick="downloadClassPDF()" class="px-4 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity bg-red-600">
+                  📄 PDF
+                </button>
+                <button onclick="downloadClassExcel()" class="px-4 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity bg-green-600">
+                  📊 Excel
+                </button>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4 md:mb-6">
+              <h3 class="text-lg md:text-xl font-bold mb-3 md:mb-4" style="color: ${config.text_color}">Filter Tanggal</h3>
+              <div class="flex flex-col md:flex-row gap-3 md:gap-4 md:items-end">
+                <div class="flex-1">
+                  <label for="startDate" class="block mb-2 text-sm md:text-base font-medium" style="color: ${config.text_color}">Dari Tanggal</label>
+                  <input type="date" id="startDate" value="${reportStartDate}" class="w-full px-3 py-2 md:px-4 md:py-2 text-sm md:text-base border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                </div>
+                <div class="flex-1">
+                  <label for="endDate" class="block mb-2 text-sm md:text-base font-medium" style="color: ${config.text_color}">Sampai Tanggal</label>
+                  <input type="date" id="endDate" value="${reportEndDate}" class="w-full px-3 py-2 md:px-4 md:py-2 text-sm md:text-base border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                </div>
+                <div class="flex gap-2 md:gap-3">
+                  <button onclick="applyDateFilter()" class="flex-1 md:flex-initial px-4 py-2 md:px-6 md:py-2 text-sm md:text-base rounded-lg font-medium text-white hover:opacity-90 transition-opacity whitespace-nowrap" style="background-color: ${config.button_color}">
+                    Terapkan
+                  </button>
+                  <button onclick="clearDateFilter()" class="flex-1 md:flex-initial px-4 py-2 md:px-6 md:py-2 text-sm md:text-base rounded-lg font-medium hover:opacity-80 transition-opacity whitespace-nowrap" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                    Reset
+                  </button>
+                </div>
+              </div>
+              ${reportStartDate && reportEndDate ? `
+                <p class="mt-3 text-xs md:text-sm font-medium" style="color: ${config.primary_color}">
+                  📅 Menampilkan data: ${formatDate(reportStartDate)} - ${formatDate(reportEndDate)}
+                </p>
+              ` : ''}
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4 md:mb-6">
+              <h3 class="text-lg md:text-xl font-bold mb-3 md:mb-4" style="color: ${config.text_color}">Ringkasan Absensi</h3>
+              <div class="overflow-x-auto -mx-4 md:mx-0">
+                <table class="w-full min-w-max md:min-w-0">
+                  <thead>
+                    <tr class="border-b-2">
+                      <th class="text-left p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">No</th>
+                      <th class="text-left p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">NISN</th>
+                      <th class="text-left p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">Nama Siswa</th>
+                      <th class="text-left p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">JK</th>
+                      <th class="text-center p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">Hadir</th>
+                      <th class="text-center p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">Sakit</th>
+                      <th class="text-center p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">Izin</th>
+                      <th class="text-center p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">Alpa</th>
+                      <th class="text-center p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">Total</th>
+                      <th class="text-center p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${studentStats.map((stat, index) => `
+                      <tr class="border-b hover:bg-gray-50">
+                        <td class="p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">${index + 1}</td>
+                        <td class="p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">${stat.student.nisn}</td>
+                        <td class="p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">${stat.student.name}</td>
+                        <td class="p-2 md:p-3 text-xs md:text-base" style="color: ${config.text_color}">${stat.student.gender}</td>
+                        <td class="text-center p-2 md:p-3 text-xs md:text-base font-bold" style="color: ${config.button_color}">${stat.present}</td>
+                        <td class="text-center p-2 md:p-3 text-xs md:text-base font-bold text-yellow-600">${stat.sick}</td>
+                        <td class="text-center p-2 md:p-3 text-xs md:text-base font-bold text-orange-600">${stat.permit}</td>
+                        <td class="text-center p-2 md:p-3 text-xs md:text-base font-bold text-red-600">${stat.absent}</td>
+                        <td class="text-center p-2 md:p-3 text-xs md:text-base font-bold" style="color: ${config.text_color}">${stat.total}</td>
+                        <td class="text-center p-2 md:p-3 text-xs md:text-base font-bold" style="color: ${config.primary_color}">${stat.percentage}%</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderStudentReport() {
+      const student = students.find(s => s.id === selectedStudentId);
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      let studentRecords = attendanceRecords.filter(r => r.studentId === selectedStudentId);
+      
+      // Filter by date range if set
+      if (reportStartDate && reportEndDate) {
+        studentRecords = studentRecords.filter(r => r.date >= reportStartDate && r.date <= reportEndDate);
+      }
+      
+      studentRecords = studentRecords.sort((a, b) => b.date.localeCompare(a.date));
+      
+      const present = studentRecords.filter(r => r.status === 'present').length;
+      const sick = studentRecords.filter(r => r.status === 'sick').length;
+      const permit = studentRecords.filter(r => r.status === 'permit').length;
+      const absent = studentRecords.filter(r => r.status === 'absent').length;
+      const total = studentRecords.length;
+      const percentage = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
+
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-6xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="backToStudentSelection()" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <div class="text-center">
+                <h2 class="text-3xl font-bold" style="color: ${config.header_color}">${student.name}</h2>
+                <p style="color: ${config.text_color}; opacity: 0.7">NISN: ${student.nisn} • Kelas ${currentClass.name}</p>
+              </div>
+              <div class="flex gap-2">
+                <button onclick="downloadStudentPDF()" class="px-4 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity bg-red-600">
+                  📄 PDF
+                </button>
+                <button onclick="downloadStudentExcel()" class="px-4 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity bg-green-600">
+                  📊 Excel
+                </button>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Filter Tanggal</h3>
+              <div class="flex gap-4 items-end">
+                <div class="flex-1">
+                  <label for="startDateStudent" class="block mb-2 font-medium" style="color: ${config.text_color}">Dari Tanggal</label>
+                  <input type="date" id="startDateStudent" value="${reportStartDate}" class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                </div>
+                <div class="flex-1">
+                  <label for="endDateStudent" class="block mb-2 font-medium" style="color: ${config.text_color}">Sampai Tanggal</label>
+                  <input type="date" id="endDateStudent" value="${reportEndDate}" class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                </div>
+                <button onclick="applyDateFilterStudent()" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                  Terapkan
+                </button>
+                <button onclick="clearDateFilter()" class="px-6 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                  Reset
+                </button>
+              </div>
+              ${reportStartDate && reportEndDate ? `
+                <p class="mt-3 text-sm font-medium" style="color: ${config.primary_color}">
+                  📅 Menampilkan data: ${formatDate(reportStartDate)} - ${formatDate(reportEndDate)}
+                </p>
+              ` : ''}
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Statistik Kehadiran</h3>
+              <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div class="text-center p-4 rounded-lg bg-green-50">
+                  <div class="text-3xl font-bold text-green-600">${present}</div>
+                  <div class="text-green-800 font-medium">Hadir</div>
+                </div>
+                <div class="text-center p-4 rounded-lg bg-yellow-50">
+                  <div class="text-3xl font-bold text-yellow-600">${sick}</div>
+                  <div class="text-yellow-800 font-medium">Sakit</div>
+                </div>
+                <div class="text-center p-4 rounded-lg bg-orange-50">
+                  <div class="text-3xl font-bold text-orange-600">${permit}</div>
+                  <div class="text-orange-800 font-medium">Izin</div>
+                </div>
+                <div class="text-center p-4 rounded-lg bg-red-50">
+                  <div class="text-3xl font-bold text-red-600">${absent}</div>
+                  <div class="text-red-800 font-medium">Alpa</div>
+                </div>
+                <div class="text-center p-4 rounded-lg bg-blue-50">
+                  <div class="text-3xl font-bold text-blue-600">${percentage}%</div>
+                  <div class="text-blue-800 font-medium">Kehadiran</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Riwayat Absensi</h3>
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead>
+                    <tr class="border-b-2">
+                      <th class="text-left p-3" style="color: ${config.text_color}">No</th>
+                      <th class="text-left p-3" style="color: ${config.text_color}">Tanggal</th>
+                      <th class="text-center p-3" style="color: ${config.text_color}">Status</th>
+                      <th class="text-left p-3" style="color: ${config.text_color}">Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${studentRecords.length === 0 ? `
+                      <tr>
+                        <td colspan="4" class="text-center p-6" style="color: ${config.text_color}">Belum ada data absensi</td>
+                      </tr>
+                    ` : studentRecords.map((record, index) => {
+                      let statusBadge = '';
+                      if (record.status === 'present') {
+                        statusBadge = `<span class="px-3 py-1 rounded-full text-white text-sm font-medium" style="background-color: ${config.button_color}">Hadir</span>`;
+                      } else if (record.status === 'sick') {
+                        statusBadge = '<span class="px-3 py-1 rounded-full bg-yellow-500 text-white text-sm font-medium">Sakit</span>';
+                      } else if (record.status === 'permit') {
+                        statusBadge = '<span class="px-3 py-1 rounded-full bg-orange-500 text-white text-sm font-medium">Izin</span>';
+                      } else if (record.status === 'absent') {
+                        statusBadge = '<span class="px-3 py-1 rounded-full bg-red-500 text-white text-sm font-medium">Alpa</span>';
+                      }
+                      
+                      return `
+                        <tr class="border-b hover:bg-gray-50">
+                          <td class="p-3" style="color: ${config.text_color}">${index + 1}</td>
+                          <td class="p-3" style="color: ${config.text_color}">${formatDate(record.date)}</td>
+                          <td class="text-center p-3">${statusBadge}</td>
+                          <td class="p-3" style="color: ${config.text_color}">${record.note || '-'}</td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function backToReportSelection() {
+      reportType = null;
+      selectedClassId = null;
+      selectedStudentId = null;
+      renderReports();
+    }
+
+    function backToClassSelection() {
+      selectedClassId = null;
+      renderReports();
+    }
+
+    function backToClassSelectionStudent() {
+      selectedClassId = null;
+      selectedStudentId = null;
+      renderReports();
+    }
+
+    function backToStudentSelection() {
+      selectedStudentId = null;
+      renderReports();
+    }
+
+    function applyDateFilter() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      
+      if (startDate && endDate) {
+        if (startDate > endDate) {
+          showNotification('⚠️ Tanggal awal tidak boleh lebih besar dari tanggal akhir!');
+          return;
+        }
+        reportStartDate = startDate;
+        reportEndDate = endDate;
+        renderReports();
+      } else {
+        showNotification('⚠️ Mohon pilih kedua tanggal!');
+      }
+    }
+
+    function clearDateFilter() {
+      reportStartDate = '';
+      reportEndDate = '';
+      renderReports();
+    }
+
+    function applyDateFilterStudent() {
+      const startDate = document.getElementById('startDateStudent').value;
+      const endDate = document.getElementById('endDateStudent').value;
+      
+      if (startDate && endDate) {
+        if (startDate > endDate) {
+          showNotification('⚠️ Tanggal awal tidak boleh lebih besar dari tanggal akhir!');
+          return;
+        }
+        reportStartDate = startDate;
+        reportEndDate = endDate;
+        renderReports();
+      } else {
+        showNotification('⚠️ Mohon pilih kedua tanggal!');
+      }
+    }
+
+    function downloadClassPDF() {
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      const classStudents = getStudentsByClass(selectedClassId);
+      let classAttendance = attendanceRecords.filter(r => r.classId === selectedClassId);
+      
+      // Filter by date range if set
+      if (reportStartDate && reportEndDate) {
+        classAttendance = classAttendance.filter(r => r.date >= reportStartDate && r.date <= reportEndDate);
+      }
+      
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      
+      // Title
+      doc.setFontSize(16);
+      doc.setFont(undefined, 'bold');
+      doc.text(`REKAP ABSENSI KELAS ${currentClass.name}`, 105, 20, { align: 'center' });
+      
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'normal');
+      doc.text(settings.schoolName, 105, 28, { align: 'center' });
+      doc.text(`Tingkat: ${currentClass.grade}`, 105, 35, { align: 'center' });
+      
+      if (reportStartDate && reportEndDate) {
+        doc.text(`Periode: ${formatDate(reportStartDate)} - ${formatDate(reportEndDate)}`, 105, 42, { align: 'center' });
+        doc.text(`Tanggal Cetak: ${formatDate(new Date())}`, 105, 49, { align: 'center' });
+      } else {
+        doc.text(`Tanggal Cetak: ${formatDate(new Date())}`, 105, 42, { align: 'center' });
+      }
+      
+      // Table data
+      const tableData = classStudents.map((student, index) => {
+        const studentRecords = classAttendance.filter(r => r.studentId === student.id);
+        const present = studentRecords.filter(r => r.status === 'present').length;
+        const sick = studentRecords.filter(r => r.status === 'sick').length;
+        const permit = studentRecords.filter(r => r.status === 'permit').length;
+        const absent = studentRecords.filter(r => r.status === 'absent').length;
+        const total = studentRecords.length;
+        const percentage = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
+        
+        return [index + 1, student.nisn, student.name, student.gender, present, sick, permit, absent, total, `${percentage}%`];
+      });
+      
+      const startY = reportStartDate && reportEndDate ? 57 : 50;
+      
+      doc.autoTable({
+        startY: startY,
+        head: [['No', 'NISN', 'Nama Siswa', 'JK', 'Hadir', 'Sakit', 'Izin', 'Alpa', 'Total', '%']],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { fillColor: [59, 130, 246], halign: 'center' },
+        styles: { fontSize: 9, cellPadding: 3 },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 10 },
+          1: { halign: 'left', cellWidth: 25 },
+          2: { halign: 'left', cellWidth: 50 },
+          3: { halign: 'center', cellWidth: 12 },
+          4: { halign: 'center', cellWidth: 15 },
+          5: { halign: 'center', cellWidth: 15 },
+          6: { halign: 'center', cellWidth: 15 },
+          7: { halign: 'center', cellWidth: 15 },
+          8: { halign: 'center', cellWidth: 15 },
+          9: { halign: 'center', cellWidth: 18 }
+        }
+      });
+      
+      // Signature section
+      const finalY = doc.lastAutoTable.finalY + 20;
+      
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      
+      // Left signature - Wali Kelas
+      if (currentClass.teacherName) {
+        doc.text('Wali Kelas', 40, finalY, { align: 'center' });
+        doc.text('', 40, finalY + 20, { align: 'center' });
+        doc.setFont(undefined, 'bold');
+        doc.text(currentClass.teacherName, 40, finalY + 25, { align: 'center' });
+        doc.setFont(undefined, 'normal');
+        doc.text(`NIP. ${currentClass.teacherNip || '-'}`, 40, finalY + 30, { align: 'center' });
+      }
+      
+      // Right signature - Guru Aplikasi
+      if (settings.appTeacher.name) {
+        doc.text('Mengetahui,', 170, finalY, { align: 'center' });
+        doc.text('', 170, finalY + 20, { align: 'center' });
+        doc.setFont(undefined, 'bold');
+        doc.text(settings.appTeacher.name, 170, finalY + 25, { align: 'center' });
+        doc.setFont(undefined, 'normal');
+        doc.text(`NIP. ${settings.appTeacher.nip || '-'}`, 170, finalY + 30, { align: 'center' });
+      }
+      
+      doc.save(`Rekap_Kelas_${currentClass.name}_${new Date().toISOString().split('T')[0]}.pdf`);
+      showNotification('✓ File PDF berhasil didownload!');
+    }
+
+    function downloadClassExcel() {
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      const classStudents = getStudentsByClass(selectedClassId);
+      let classAttendance = attendanceRecords.filter(r => r.classId === selectedClassId);
+      
+      // Filter by date range if set
+      if (reportStartDate && reportEndDate) {
+        classAttendance = classAttendance.filter(r => r.date >= reportStartDate && r.date <= reportEndDate);
+      }
+      
+      // Prepare workbook data
+      const wb = XLSX.utils.book_new();
+      
+      // Header info
+      const headerData = [
+        ['REKAP ABSENSI KELAS ' + currentClass.name],
+        [settings.schoolName],
+        ['Tingkat: ' + currentClass.grade],
+        ['Tanggal Cetak: ' + formatDate(new Date())],
+        []
+      ];
+      
+      if (reportStartDate && reportEndDate) {
+        headerData.splice(3, 0, ['Periode: ' + formatDate(reportStartDate) + ' - ' + formatDate(reportEndDate)]);
+      }
+      
+      // Table headers
+      const tableHeaders = [['No', 'NISN', 'Nama Siswa', 'JK', 'Hadir', 'Sakit', 'Izin', 'Alpa', 'Total', 'Persentase']];
+      
+      // Table data
+      const tableData = classStudents.map((student, index) => {
+        const studentRecords = classAttendance.filter(r => r.studentId === student.id);
+        const present = studentRecords.filter(r => r.status === 'present').length;
+        const sick = studentRecords.filter(r => r.status === 'sick').length;
+        const permit = studentRecords.filter(r => r.status === 'permit').length;
+        const absent = studentRecords.filter(r => r.status === 'absent').length;
+        const total = studentRecords.length;
+        const percentage = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
+        
+        return [index + 1, student.nisn, student.name, student.gender, present, sick, permit, absent, total, percentage + '%'];
+      });
+      
+      // Combine all data
+      const wsData = [...headerData, ...tableHeaders, ...tableData];
+      
+      // Create worksheet
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 5 },  // No
+        { wch: 15 }, // NISN
+        { wch: 25 }, // Nama
+        { wch: 5 },  // JK
+        { wch: 8 },  // Hadir
+        { wch: 8 },  // Sakit
+        { wch: 8 },  // Izin
+        { wch: 8 },  // Alpa
+        { wch: 8 },  // Total
+        { wch: 12 }  // Persentase
+      ];
+      
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, 'Rekap Absensi');
+      
+      // Save file
+      XLSX.writeFile(wb, `Rekap_Kelas_${currentClass.name}_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      showNotification('✓ File Excel berhasil didownload!');
+    }
+
+    function downloadStudentPDF() {
+      const student = students.find(s => s.id === selectedStudentId);
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      let studentRecords = attendanceRecords.filter(r => r.studentId === selectedStudentId);
+      
+      // Filter by date range if set
+      if (reportStartDate && reportEndDate) {
+        studentRecords = studentRecords.filter(r => r.date >= reportStartDate && r.date <= reportEndDate);
+      }
+      
+      studentRecords = studentRecords.sort((a, b) => b.date.localeCompare(a.date));
+      
+      const present = studentRecords.filter(r => r.status === 'present').length;
+      const sick = studentRecords.filter(r => r.status === 'sick').length;
+      const permit = studentRecords.filter(r => r.status === 'permit').length;
+      const absent = studentRecords.filter(r => r.status === 'absent').length;
+      const total = studentRecords.length;
+      const percentage = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
+      
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      
+      // Title
+      doc.setFontSize(16);
+      doc.setFont(undefined, 'bold');
+      doc.text('REKAP ABSENSI SISWA', 105, 20, { align: 'center' });
+      
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'normal');
+      doc.text(settings.schoolName, 105, 28, { align: 'center' });
+      
+      // Student Info
+      doc.setFontSize(11);
+      doc.text(`Nama: ${student.name}`, 20, 40);
+      doc.text(`NISN: ${student.nisn}`, 20, 47);
+      doc.text(`Kelas: ${currentClass.name}`, 20, 54);
+      doc.text(`Jenis Kelamin: ${student.gender === 'L' ? 'Laki-laki' : 'Perempuan'}`, 20, 61);
+      
+      if (reportStartDate && reportEndDate) {
+        doc.text(`Periode: ${formatDate(reportStartDate)} - ${formatDate(reportEndDate)}`, 20, 68);
+      }
+      
+      // Statistics
+      const statsY = reportStartDate && reportEndDate ? 80 : 73;
+      doc.setFont(undefined, 'bold');
+      doc.text('STATISTIK KEHADIRAN:', 20, statsY);
+      doc.setFont(undefined, 'normal');
+      doc.text(`Hadir: ${present}  |  Sakit: ${sick}  |  Izin: ${permit}  |  Alpa: ${absent}  |  Total: ${total}  |  Persentase: ${percentage}%`, 20, statsY + 7);
+      
+      // Attendance History Table
+      const statusMap = { present: 'Hadir', sick: 'Sakit', permit: 'Izin', absent: 'Alpa' };
+      const tableData = studentRecords.map((record, index) => [
+        index + 1,
+        formatDate(record.date),
+        statusMap[record.status],
+        record.note || '-'
+      ]);
+      
+      const tableStartY = reportStartDate && reportEndDate ? 97 : 90;
+      
+      doc.autoTable({
+        startY: tableStartY,
+        head: [['No', 'Tanggal', 'Status', 'Keterangan']],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { fillColor: [59, 130, 246], halign: 'center' },
+        styles: { fontSize: 10, cellPadding: 3 },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 15 },
+          1: { halign: 'center', cellWidth: 30 },
+          2: { halign: 'center', cellWidth: 25 },
+          3: { halign: 'left', cellWidth: 120 }
+        }
+      });
+      
+      // Signature section
+      const finalY = doc.lastAutoTable.finalY + 20;
+      
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      
+      // Left signature - Wali Kelas
+      if (currentClass.teacherName) {
+        doc.text('Wali Kelas', 40, finalY, { align: 'center' });
+        doc.text('', 40, finalY + 20, { align: 'center' });
+        doc.setFont(undefined, 'bold');
+        doc.text(currentClass.teacherName, 40, finalY + 25, { align: 'center' });
+        doc.setFont(undefined, 'normal');
+        doc.text(`NIP. ${currentClass.teacherNip || '-'}`, 40, finalY + 30, { align: 'center' });
+      }
+      
+      // Right signature - Guru Aplikasi
+      if (settings.appTeacher.name) {
+        doc.text('Mengetahui,', 170, finalY, { align: 'center' });
+        doc.text('', 170, finalY + 20, { align: 'center' });
+        doc.setFont(undefined, 'bold');
+        doc.text(settings.appTeacher.name, 170, finalY + 25, { align: 'center' });
+        doc.setFont(undefined, 'normal');
+        doc.text(`NIP. ${settings.appTeacher.nip || '-'}`, 170, finalY + 30, { align: 'center' });
+      }
+      
+      doc.save(`Rekap_${student.name}_${new Date().toISOString().split('T')[0]}.pdf`);
+      showNotification('✓ File PDF berhasil didownload!');
+    }
+
+    function downloadStudentExcel() {
+      const student = students.find(s => s.id === selectedStudentId);
+      const currentClass = classes.find(c => c.id === selectedClassId);
+      let studentRecords = attendanceRecords.filter(r => r.studentId === selectedStudentId);
+      
+      // Filter by date range if set
+      if (reportStartDate && reportEndDate) {
+        studentRecords = studentRecords.filter(r => r.date >= reportStartDate && r.date <= reportEndDate);
+      }
+      
+      studentRecords = studentRecords.sort((a, b) => b.date.localeCompare(a.date));
+      
+      const present = studentRecords.filter(r => r.status === 'present').length;
+      const sick = studentRecords.filter(r => r.status === 'sick').length;
+      const permit = studentRecords.filter(r => r.status === 'permit').length;
+      const absent = studentRecords.filter(r => r.status === 'absent').length;
+      const total = studentRecords.length;
+      const percentage = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
+      
+      // Prepare workbook data
+      const wb = XLSX.utils.book_new();
+      
+      // Header info
+      const headerData = [
+        ['REKAP ABSENSI SISWA'],
+        [settings.schoolName],
+        [],
+        ['Nama', student.name],
+        ['NISN', student.nisn],
+        ['Kelas', currentClass.name],
+        ['Jenis Kelamin', student.gender === 'L' ? 'Laki-laki' : 'Perempuan'],
+        []
+      ];
+      
+      if (reportStartDate && reportEndDate) {
+        headerData.push(['Periode', formatDate(reportStartDate) + ' - ' + formatDate(reportEndDate)]);
+        headerData.push([]);
+      }
+      
+      // Statistics
+      const statsData = [
+        ['STATISTIK KEHADIRAN'],
+        ['Hadir', present],
+        ['Sakit', sick],
+        ['Izin', permit],
+        ['Alpa', absent],
+        ['Total', total],
+        ['Persentase', percentage + '%'],
+        []
+      ];
+      
+      // Attendance history headers
+      const historyHeaders = [
+        ['RIWAYAT ABSENSI'],
+        ['No', 'Tanggal', 'Status', 'Keterangan']
+      ];
+      
+      // Attendance history data
+      const statusMap = { present: 'Hadir', sick: 'Sakit', permit: 'Izin', absent: 'Alpa' };
+      const historyData = studentRecords.map((record, index) => [
+        index + 1,
+        formatDate(record.date),
+        statusMap[record.status],
+        record.note || '-'
+      ]);
+      
+      // Combine all data
+      const wsData = [...headerData, ...statsData, ...historyHeaders, ...historyData];
+      
+      // Create worksheet
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 20 }, // Column A
+        { wch: 30 }, // Column B
+        { wch: 15 }, // Column C
+        { wch: 40 }  // Column D
+      ];
+      
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, 'Rekap Siswa');
+      
+      // Save file
+      XLSX.writeFile(wb, `Rekap_${student.name}_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      showNotification('✓ File Excel berhasil didownload!');
+    }
+
+    function showNotification(message) {
+      const notification = document.createElement('div');
+      notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.remove();
+      }, 3000);
+    }
+
+    function renderSettings() {
+      const app = document.getElementById('app');
+      
+      app.innerHTML = `
+        <div class="min-h-full p-6">
+          <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+              <button onclick="navigateTo('home')" class="px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                ← Kembali
+              </button>
+              <h2 class="text-3xl font-bold" style="color: ${config.header_color}">Pengaturan</h2>
+              <div style="width: 140px"></div>
+            </div>
+
+            <!-- Password Setting -->
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Keamanan</h3>
+              <form onsubmit="updatePassword(event)" class="space-y-4">
+                <div>
+                  <label for="currentPassword" class="block mb-2 font-medium" style="color: ${config.text_color}">Password Saat Ini</label>
+                  <input type="password" id="currentPassword" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Masukkan password saat ini">
+                </div>
+                <div>
+                  <label for="newPassword" class="block mb-2 font-medium" style="color: ${config.text_color}">Password Baru</label>
+                  <input type="password" id="newPassword" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Masukkan password baru">
+                </div>
+                <div>
+                  <label for="confirmPassword" class="block mb-2 font-medium" style="color: ${config.text_color}">Konfirmasi Password Baru</label>
+                  <input type="password" id="confirmPassword" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Ulangi password baru">
+                </div>
+                <button type="submit" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                  🔐 Ubah Password
+                </button>
+              </form>
+            </div>
+
+            <!-- School Name Setting -->
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Informasi Sekolah</h3>
+              <form onsubmit="updateSchoolName(event)" class="space-y-4">
+                <div>
+                  <label for="schoolNameInput" class="block mb-2 font-medium" style="color: ${config.text_color}">Nama Sekolah</label>
+                  <input type="text" id="schoolNameInput" value="${settings.schoolName}" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+                </div>
+                <button type="submit" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                  💾 Simpan
+                </button>
+              </form>
+            </div>
+
+            <!-- App Teacher Setting -->
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Data Guru Pemilik Aplikasi</h3>
+              <p class="text-sm mb-4" style="color: ${config.text_color}; opacity: 0.7">Data ini akan ditampilkan di PDF untuk tanda tangan</p>
+              <form onsubmit="updateAppTeacher(event)" class="space-y-4">
+                <div>
+                  <label for="appTeacherName" class="block mb-2 font-medium" style="color: ${config.text_color}">Nama Guru</label>
+                  <input type="text" id="appTeacherName" value="${settings.appTeacher.name}" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Nama lengkap guru">
+                </div>
+                <div>
+                  <label for="appTeacherNip" class="block mb-2 font-medium" style="color: ${config.text_color}">NIP</label>
+                  <input type="text" id="appTeacherNip" value="${settings.appTeacher.nip}" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="NIP guru">
+                </div>
+                <button type="submit" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                  💾 Simpan
+                </button>
+              </form>
+            </div>
+
+            <!-- Data Management -->
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Kelola Data</h3>
+              <p class="text-sm mb-4" style="color: ${config.text_color}; opacity: 0.7">Backup, restore, atau hapus semua data aplikasi</p>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <button onclick="backupData()" class="px-6 py-3 rounded-lg font-medium text-white hover:opacity-90 transition-opacity bg-blue-600">
+                  💾 Backup Data
+                </button>
+                <button onclick="showRestoreForm()" class="px-6 py-3 rounded-lg font-medium text-white hover:opacity-90 transition-opacity bg-green-600">
+                  📥 Restore Data
+                </button>
+                <button onclick="confirmDeleteAllData()" class="px-6 py-3 rounded-lg font-medium text-white hover:opacity-90 transition-opacity bg-red-600">
+                  🗑️ Hapus Semua Data
+                </button>
+              </div>
+            </div>
+
+            <!-- Teachers Management -->
+            <div class="bg-white rounded-xl shadow-lg p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-bold" style="color: ${config.text_color}">Data Guru</h3>
+                <button onclick="showAddTeacherForm()" class="px-4 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                  + Tambah Guru
+                </button>
+              </div>
+
+              <div id="teacherFormContainer" class="hidden mb-6 p-4 rounded-lg" style="background-color: ${config.secondary_color}; border: 2px solid ${config.primary_color}">
+                <h4 class="font-bold mb-3" style="color: ${config.text_color}">Tambah Guru Baru</h4>
+                <form onsubmit="handleAddTeacher(event)" class="space-y-3">
+                  <div>
+                    <label for="teacherName" class="block mb-2 font-medium" style="color: ${config.text_color}">Nama Guru</label>
+                    <input type="text" id="teacherName" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Contoh: Budi Santoso">
+                  </div>
+                  <div>
+                    <label for="teacherNip" class="block mb-2 font-medium" style="color: ${config.text_color}">NIP</label>
+                    <input type="text" id="teacherNip" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}" placeholder="Contoh: 197001012005011001">
+                  </div>
+                  <div class="flex gap-3">
+                    <button type="submit" class="px-6 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.button_color}">
+                      Simpan
+                    </button>
+                    <button type="button" onclick="hideAddTeacherForm()" class="px-6 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                      Batal
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <div id="teacherListContainer">
+                ${settings.teachers.length === 0 ? `
+                  <div class="text-center py-8" style="color: ${config.text_color}; opacity: 0.7">
+                    <div class="text-5xl mb-3">👨</div>
+                    <p>Belum ada data guru. Tambahkan guru pertama!</p>
+                  </div>
+                ` : `
+                  <div class="space-y-3">
+                    ${settings.teachers.map((teacher, index) => `
+                      <div class="flex items-center justify-between p-4 rounded-lg" style="background-color: ${config.secondary_color}; border: 1px solid ${config.primary_color}">
+                        <div class="flex items-center gap-4">
+                          <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style="background-color: ${config.primary_color}">
+                            ${index + 1}
+                          </div>
+                          <div>
+                            <h4 class="font-bold text-lg" style="color: ${config.text_color}">${teacher.name}</h4>
+                            <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">NIP: ${teacher.nip}</p>
+                          </div>
+                        </div>
+                        <button onclick="deleteTeacher(${index})" class="px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors">
+                          Hapus
+                        </button>
+                      </div>
+                    `).join('')}
+                  </div>
+                `}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function updateSchoolName(event) {
+      event.preventDefault();
+      const schoolName = document.getElementById('schoolNameInput').value.trim();
+      if (schoolName) {
+        settings.schoolName = schoolName;
+        saveSettings();
+        showNotification('✓ Nama sekolah berhasil diperbarui!');
+        renderSettings();
+      }
+    }
+
+    function updateAppTeacher(event) {
+      event.preventDefault();
+      const name = document.getElementById('appTeacherName').value.trim();
+      const nip = document.getElementById('appTeacherNip').value.trim();
+      if (name && nip) {
+        settings.appTeacher = { name, nip };
+        saveSettings();
+        showNotification('✓ Data guru berhasil diperbarui!');
+        renderSettings();
+      }
+    }
+
+    function showAddTeacherForm() {
+      document.getElementById('teacherFormContainer').classList.remove('hidden');
+    }
+
+    function hideAddTeacherForm() {
+      document.getElementById('teacherFormContainer').classList.add('hidden');
+      document.getElementById('teacherName').value = '';
+      document.getElementById('teacherNip').value = '';
+    }
+
+    function handleAddTeacher(event) {
+      event.preventDefault();
+      const name = document.getElementById('teacherName').value.trim();
+      const nip = document.getElementById('teacherNip').value.trim();
+      
+      if (name && nip) {
+        settings.teachers.push({ id: generateId(), name, nip });
+        saveSettings();
+        hideAddTeacherForm();
+        showNotification('✓ Guru berhasil ditambahkan!');
+        renderSettings();
+      }
+    }
+
+    function deleteTeacher(index) {
+      const teacher = settings.teachers[index];
+      
+      const confirmMsg = document.createElement('div');
+      confirmMsg.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      confirmMsg.innerHTML = `
+        <div class="bg-white rounded-xl p-6 max-w-md mx-4">
+          <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Hapus Guru?</h3>
+          <p class="mb-6" style="color: ${config.text_color}">Apakah Anda yakin ingin menghapus ${teacher.name}?</p>
+          <div class="flex gap-3">
+            <button onclick="executeDeleteTeacher(${index})" class="flex-1 px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600">
+              Hapus
+            </button>
+            <button onclick="this.closest('.fixed').remove()" class="flex-1 px-4 py-2 rounded-lg font-medium" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+              Batal
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(confirmMsg);
+    }
+
+    function executeDeleteTeacher(index) {
+      settings.teachers.splice(index, 1);
+      saveSettings();
+      document.querySelector('.fixed.inset-0').remove();
+      showNotification('✓ Guru berhasil dihapus!');
+      renderSettings();
+    }
+
+    function handleLogin(event) {
+      event.preventDefault();
+      const password = document.getElementById('loginPassword').value;
+      
+      // Debug: tampilkan password yang dimasukkan dan password yang disimpan
+      console.log('Password yang dimasukkan:', password);
+      console.log('Password yang tersimpan:', settings.password);
+      
+      if (login(password)) {
+        // Login berhasil, tidak perlu showNotification karena akan langsung render
+      } else {
+        const loginPassword = document.getElementById('loginPassword');
+        loginPassword.value = '';
+        loginPassword.style.borderColor = '#EF4444';
+        
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+        errorMsg.textContent = '❌ Password salah! Coba: ' + settings.password;
+        document.body.appendChild(errorMsg);
+        
+        setTimeout(() => {
+          errorMsg.remove();
+          loginPassword.style.borderColor = config.primary_color;
+        }, 5000);
+      }
+    }
+
+    function updatePassword(event) {
+      event.preventDefault();
+      const currentPassword = document.getElementById('currentPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+      
+      if (currentPassword !== settings.password) {
+        showNotification('❌ Password saat ini salah!');
+        return;
+      }
+      
+      if (newPassword.length < 6) {
+        showNotification('❌ Password baru minimal 6 karakter!');
+        return;
+      }
+      
+      if (newPassword !== confirmPassword) {
+        showNotification('❌ Konfirmasi password tidak cocok!');
+        return;
+      }
+      
+      settings.password = newPassword;
+      saveSettings();
+      
+      document.getElementById('currentPassword').value = '';
+      document.getElementById('newPassword').value = '';
+      document.getElementById('confirmPassword').value = '';
+      
+      showNotification('✓ Password berhasil diubah!');
+    }
+
+    function backupData() {
+      const backupData = {
+        version: '1.0',
+        timestamp: new Date().toISOString(),
+        settings: settings,
+        classes: classes,
+        students: students,
+        attendanceRecords: attendanceRecords
+      };
+      
+      const dataStr = JSON.stringify(backupData, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Backup_Absensi_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      showNotification('✓ Backup data berhasil didownload!');
+    }
+
+    function showRestoreForm() {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      modal.innerHTML = `
+        <div class="bg-white rounded-xl p-6 max-w-md mx-4 w-full">
+          <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Restore Data</h3>
+          <p class="mb-4 text-sm" style="color: ${config.text_color}; opacity: 0.8">Pilih file backup (format .json) untuk mengembalikan data</p>
+          <div class="mb-4 p-4 rounded-lg bg-yellow-50 border border-yellow-200">
+            <p class="text-sm text-yellow-800">⚠️ <strong>Perhatian:</strong> Proses restore akan mengganti semua data yang ada saat ini!</p>
+          </div>
+          <form onsubmit="handleRestore(event)" class="space-y-4">
+            <div>
+              <label for="restoreFile" class="block mb-2 font-medium" style="color: ${config.text_color}">Pilih File Backup</label>
+              <input type="file" id="restoreFile" accept=".json" required class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.primary_color}">
+            </div>
+            <div class="flex gap-3">
+              <button type="submit" class="flex-1 px-4 py-2 rounded-lg font-medium text-white hover:opacity-90 transition-opacity bg-green-600">
+                Restore
+              </button>
+              <button type="button" onclick="this.closest('.fixed').remove()" class="flex-1 px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+                Batal
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    function handleRestore(event) {
+      event.preventDefault();
+      const fileInput = document.getElementById('restoreFile');
+      const file = fileInput.files[0];
+      
+      if (!file) {
+        showNotification('⚠️ Pilih file backup terlebih dahulu!');
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const backupData = JSON.parse(e.target.result);
+          
+          // Validate backup data structure
+          if (!backupData.version || !backupData.settings || !backupData.classes || !backupData.students || !backupData.attendanceRecords) {
+            showNotification('❌ File backup tidak valid!');
+            return;
+          }
+          
+          // Restore data
+          settings = backupData.settings;
+          classes = backupData.classes;
+          students = backupData.students;
+          attendanceRecords = backupData.attendanceRecords;
+          
+          // Save to localStorage
+          saveSettings();
+          saveToLocalStorage();
+          
+          // Close modal
+          document.querySelector('.fixed.inset-0').remove();
+          
+          showNotification('✓ Data berhasil direstore!');
+          
+          // Refresh display after 1 second
+          setTimeout(() => {
+            renderApp();
+          }, 1000);
+        } catch (error) {
+          showNotification('❌ Gagal membaca file backup!');
+          console.error(error);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function confirmDeleteAllData() {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      modal.innerHTML = `
+        <div class="bg-white rounded-xl p-6 max-w-md mx-4">
+          <h3 class="text-xl font-bold mb-4 text-red-600">⚠️ Hapus Semua Data?</h3>
+          <div class="mb-6">
+            <p class="mb-3" style="color: ${config.text_color}">Tindakan ini akan menghapus:</p>
+            <ul class="list-disc list-inside space-y-1 text-sm" style="color: ${config.text_color}">
+              <li>Semua data kelas (${classes.length} kelas)</li>
+              <li>Semua data siswa (${students.length} siswa)</li>
+              <li>Semua data absensi (${attendanceRecords.length} rekaman)</li>
+              <li>Semua data guru (${settings.teachers.length} guru)</li>
+            </ul>
+            <p class="mt-4 font-bold text-red-600">Data yang dihapus tidak dapat dikembalikan!</p>
+            <p class="mt-2 text-sm" style="color: ${config.text_color}; opacity: 0.8">Pastikan Anda sudah melakukan backup sebelum menghapus data.</p>
+          </div>
+          <div class="mb-4">
+            <label for="confirmText" class="block mb-2 font-medium" style="color: ${config.text_color}">Ketik <strong>HAPUS</strong> untuk konfirmasi:</label>
+            <input type="text" id="confirmText" class="w-full px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2 border-red-500" placeholder="Ketik HAPUS">
+          </div>
+          <div class="flex gap-3">
+            <button onclick="executeDeleteAllData()" class="flex-1 px-4 py-2 rounded-lg font-medium text-white bg-red-600 hover:bg-red-700 transition-colors">
+              Hapus Semua
+            </button>
+            <button onclick="this.closest('.fixed').remove()" class="flex-1 px-4 py-2 rounded-lg font-medium hover:opacity-80 transition-opacity" style="background-color: ${config.secondary_color}; color: ${config.text_color}; border: 2px solid ${config.primary_color}">
+              Batal
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    function executeDeleteAllData() {
+      const confirmText = document.getElementById('confirmText').value;
+      
+      if (confirmText !== 'HAPUS') {
+        showNotification('❌ Konfirmasi tidak sesuai! Ketik HAPUS dengan huruf kapital.');
+        return;
+      }
+      
+      // Clear all data
+      classes = [];
+      students = [];
+      attendanceRecords = [];
+      settings.teachers = [];
+      
+      // Save to localStorage
+      saveSettings();
+      saveToLocalStorage();
+      
+      // Close modal
+      document.querySelector('.fixed.inset-0').remove();
+      
+      showNotification('✓ Semua data berhasil dihapus!');
+      
+      // Refresh display
+      setTimeout(() => {
+        renderApp();
+      }, 1000);
+    }
+
+    async function onConfigChange(newConfig) {
+      const elements = {
+        appTitle: document.querySelectorAll('h1'),
+        schoolName: document.querySelectorAll('p'),
+        headerColor: document.querySelectorAll('[style*="color"]'),
+        buttons: document.querySelectorAll('button'),
+        primaryElements: document.querySelectorAll('[style*="background-color"]')
+      };
+
+      elements.appTitle.forEach(el => {
+        if (el.textContent.includes(config.app_title)) {
+          el.textContent = newConfig.app_title || defaultConfig.app_title;
+        }
+      });
+
+      config = { ...config, ...newConfig };
+      renderApp();
+    }
+
+    const capabilities = {
+      recolorables: [
+        {
+          get: () => config.primary_color || defaultConfig.primary_color,
+          set: (value) => {
+            config.primary_color = value;
+            window.elementSdk.setConfig({ primary_color: value });
+          }
+        },
+        {
+          get: () => config.secondary_color || defaultConfig.secondary_color,
+          set: (value) => {
+            config.secondary_color = value;
+            window.elementSdk.setConfig({ secondary_color: value });
+          }
+        },
+        {
+          get: () => config.text_color || defaultConfig.text_color,
+          set: (value) => {
+            config.text_color = value;
+            window.elementSdk.setConfig({ text_color: value });
+          }
+        },
+        {
+          get: () => config.header_color || defaultConfig.header_color,
+          set: (value) => {
+            config.header_color = value;
+            window.elementSdk.setConfig({ header_color: value });
+          }
+        },
+        {
+          get: () => config.button_color || defaultConfig.button_color,
+          set: (value) => {
+            config.button_color = value;
+            window.elementSdk.setConfig({ button_color: value });
+          }
+        }
+      ],
+      borderables: [],
+      fontEditable: undefined,
+      fontSizeable: undefined
+    };
+
+    if (window.elementSdk) {
+      window.elementSdk.init({
+        defaultConfig,
+        onConfigChange,
+        mapToCapabilities: () => capabilities,
+        mapToEditPanelValues: (cfg) => new Map([
+          ["app_title", cfg.app_title || defaultConfig.app_title],
+          ["school_name", cfg.school_name || defaultConfig.school_name]
+        ])
+      });
+    }
+
+    renderApp();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9ad3768b422a9cd4',t:'MTc2NTYwNzk1My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
