@@ -3,7 +3,7 @@
  <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Absen Digital Siswa V.1.0</title>
+  <title>ABSEN DIGITAL SISWA</title>
   <script src="/_sdk/element_sdk.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -288,7 +288,7 @@
               <div class="bg-white rounded-2xl shadow-2xl p-8">
                 <div class="text-center mb-6">
                   <div class="text-6xl mb-4">🎓</div>
-                  <h1 class="text-3xl font-bold mb-2" style="color: ${config.header_color}">Absen Digital Siswa V.1.0</h1>
+                  <h1 class="text-3xl font-bold mb-2" style="color: ${config.header_color}">ABSEN DIGITAL SISWA</h1>
                   <p class="text-lg font-medium" style="color: ${config.primary_color}">Sistem Absensi Digital</p>
                 </div>
 
@@ -359,7 +359,7 @@
 
               <button onclick="navigateTo('attendance')" class="bg-white rounded-xl shadow-lg p-8 hover:shadow-xl transition-all transform hover:scale-105" style="border-left: 6px solid ${config.button_color}">
                 <div class="text-6xl mb-4">✅</div>
-                <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Absen Siswa</h2>
+                <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">ABSEN DIGITAL SISWA</h2>
                 <p style="color: ${config.text_color}; opacity: 0.7">Lakukan absensi harian</p>
               </button>
 
@@ -370,7 +370,7 @@
               </button>
 
               <button onclick="navigateTo('settings')" class="bg-white rounded-xl shadow-lg p-8 hover:shadow-xl transition-all transform hover:scale-105" style="border-left: 6px solid #6366F1">
-                <div class="text-6xl mb-4">🔧</div>
+                <div class="text-6xl mb-4">⚙️</div>
                 <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Pengaturan</h2>
                 <p style="color: ${config.text_color}; opacity: 0.7">Kelola sekolah dan guru</p>
               </button>
@@ -378,7 +378,7 @@
 
             <div class="max-w-4xl mx-auto mt-8 bg-white rounded-xl shadow-lg p-6">
               <h3 class="text-2xl font-bold mb-4" style="color: ${config.text_color}">📅 Kehadiran Hari Ini</h3>
-              <div id="todaySummary" class="space-y-3">
+              <div id="todaySummary" class="space-y-3 max-h-96 overflow-y-auto pr-2">
                 ${getTodaySummary()}
               </div>
             </div>
@@ -491,6 +491,9 @@
                         <button onclick="viewStudents('${cls.id}')" class="flex-1 md:flex-initial px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded-lg font-medium text-white hover:opacity-90 transition-opacity" style="background-color: ${config.primary_color}">
                           Siswa
                         </button>
+                        <button onclick="showEditClassForm('${cls.id}')" class="flex-1 md:flex-initial px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded-lg font-medium text-white bg-yellow-500 hover:bg-yellow-600 transition-colors">
+                          Edit
+                        </button>
                         <button onclick="confirmDeleteClass('${cls.id}')" class="flex-1 md:flex-initial px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors">
                           Hapus
                         </button>
@@ -560,7 +563,7 @@
             <div id="importExcelContainer" class="hidden mb-6 bg-white rounded-xl shadow-lg p-6">
               <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Import Siswa dari Excel</h3>
               <div class="mb-4 p-4 rounded-lg bg-blue-50 border border-blue-200">
-                <p class="text-sm font-medium text-blue-900 mb-2">📋 Format Excel:</p>
+                <p class="text-sm font-medium text-blue-900 mb-2">👥 Format Excel:</p>
                 <ul class="text-sm text-blue-800 space-y-1 ml-4">
                   <li>• Kolom A: Nama Lengkap</li>
                   <li>• Kolom B: NISN</li>
@@ -608,9 +611,14 @@
                       <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">NISN: ${student.nisn} • ${student.gender === 'L' ? '👨 Laki-laki' : '👩 Perempuan'}</p>
                     </div>
                   </div>
-                  <button onclick="confirmDeleteStudent('${student.id}')" class="px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors">
-                    Hapus
-                  </button>
+                  <div class="flex gap-2">
+                    <button onclick="showEditStudentForm('${student.id}')" class="px-4 py-2 rounded-lg font-medium text-white bg-yellow-500 hover:bg-yellow-600 transition-colors">
+                      Edit
+                    </button>
+                    <button onclick="confirmDeleteStudent('${student.id}')" class="px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors">
+                      Hapus
+                    </button>
+                  </div>
                 </div>
               `).join('')}
             </div>
@@ -902,6 +910,57 @@
       document.getElementById('classFormContainer').classList.add('hidden');
       document.getElementById('className').value = '';
       document.getElementById('classGrade').value = '7';
+      document.getElementById('classTeacher').value = '';
+      
+      // Reset form to add mode
+      const form = document.querySelector('#classFormContainer form');
+      form.onsubmit = handleAddClass;
+      document.querySelector('#classFormContainer h3').textContent = 'Tambah Kelas Baru';
+    }
+
+    let editingClassId = null;
+
+    function showEditClassForm(classId) {
+      editingClassId = classId;
+      const cls = classes.find(c => c.id === classId);
+      
+      document.getElementById('classFormContainer').classList.remove('hidden');
+      document.getElementById('className').value = cls.name;
+      document.getElementById('classGrade').value = cls.grade;
+      document.getElementById('classTeacher').value = cls.teacherId || '';
+      
+      // Change form title and submit handler
+      document.querySelector('#classFormContainer h3').textContent = 'Edit Kelas';
+      const form = document.querySelector('#classFormContainer form');
+      form.onsubmit = handleEditClass;
+      
+      // Scroll to form
+      document.getElementById('classFormContainer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function handleEditClass(event) {
+      event.preventDefault();
+      const name = document.getElementById('className').value.trim();
+      const grade = document.getElementById('classGrade').value;
+      const teacherId = document.getElementById('classTeacher').value;
+      
+      if (name && grade && editingClassId) {
+        const classIndex = classes.findIndex(c => c.id === editingClassId);
+        if (classIndex !== -1) {
+          const teacher = settings.teachers.find(t => t.id === teacherId);
+          classes[classIndex].name = name;
+          classes[classIndex].grade = grade;
+          classes[classIndex].teacherId = teacherId || null;
+          classes[classIndex].teacherName = teacher ? teacher.name : '';
+          classes[classIndex].teacherNip = teacher ? teacher.nip : '';
+          
+          saveToLocalStorage();
+          showNotification('✓ Data kelas berhasil diperbarui!');
+          editingClassId = null;
+          hideAddClassForm();
+          renderClassList();
+        }
+      }
     }
 
     function handleAddClass(event) {
@@ -960,6 +1019,54 @@
       document.getElementById('studentFormContainer').classList.add('hidden');
       document.getElementById('studentName').value = '';
       document.getElementById('studentNisn').value = '';
+      document.getElementById('studentGender').value = 'L';
+      
+      // Reset form to add mode
+      const form = document.querySelector('#studentFormContainer form');
+      form.onsubmit = handleAddStudent;
+      document.querySelector('#studentFormContainer h3').textContent = 'Tambah Siswa Baru';
+    }
+
+    let editingStudentId = null;
+
+    function showEditStudentForm(studentId) {
+      editingStudentId = studentId;
+      const student = students.find(s => s.id === studentId);
+      
+      document.getElementById('studentFormContainer').classList.remove('hidden');
+      document.getElementById('studentName').value = student.name;
+      document.getElementById('studentNisn').value = student.nisn;
+      document.getElementById('studentGender').value = student.gender;
+      
+      // Change form title and submit handler
+      document.querySelector('#studentFormContainer h3').textContent = 'Edit Siswa';
+      const form = document.querySelector('#studentFormContainer form');
+      form.onsubmit = handleEditStudent;
+      
+      // Scroll to form
+      document.getElementById('studentFormContainer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function handleEditStudent(event) {
+      event.preventDefault();
+      const name = document.getElementById('studentName').value.trim();
+      const nisn = document.getElementById('studentNisn').value.trim();
+      const gender = document.getElementById('studentGender').value;
+      
+      if (name && nisn && gender && editingStudentId) {
+        const studentIndex = students.findIndex(s => s.id === editingStudentId);
+        if (studentIndex !== -1) {
+          students[studentIndex].name = name;
+          students[studentIndex].nisn = nisn;
+          students[studentIndex].gender = gender;
+          
+          saveToLocalStorage();
+          showNotification('✓ Data siswa berhasil diperbarui!');
+          editingStudentId = null;
+          hideAddStudentForm();
+          renderStudentList();
+        }
+      }
     }
 
     function showImportExcelForm() {
@@ -1732,7 +1839,7 @@
       }
       
       doc.save(`Rekap_Kelas_${currentClass.name}_${new Date().toISOString().split('T')[0]}.pdf`);
-      showNotification('✓ File PDF berhasil didownload!');
+      showNotification('��� File PDF berhasil didownload!');
     }
 
     function downloadClassExcel() {
@@ -2147,9 +2254,14 @@
                             <p class="text-sm" style="color: ${config.text_color}; opacity: 0.7">NIP: ${teacher.nip}</p>
                           </div>
                         </div>
-                        <button onclick="deleteTeacher(${index})" class="px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors">
-                          Hapus
-                        </button>
+                        <div class="flex gap-2">
+                          <button onclick="showEditTeacherForm(${index})" class="px-4 py-2 rounded-lg font-medium text-white bg-yellow-500 hover:bg-yellow-600 transition-colors">
+                            Edit
+                          </button>
+                          <button onclick="deleteTeacher(${index})" class="px-4 py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 transition-colors">
+                            Hapus
+                          </button>
+                        </div>
                       </div>
                     `).join('')}
                   </div>
@@ -2192,6 +2304,11 @@
       document.getElementById('teacherFormContainer').classList.add('hidden');
       document.getElementById('teacherName').value = '';
       document.getElementById('teacherNip').value = '';
+      
+      // Reset form to add mode
+      const form = document.querySelector('#teacherFormContainer form');
+      form.onsubmit = handleAddTeacher;
+      document.querySelector('#teacherFormContainer h4').textContent = 'Tambah Guru Baru';
     }
 
     function handleAddTeacher(event) {
@@ -2204,6 +2321,52 @@
         saveSettings();
         hideAddTeacherForm();
         showNotification('✓ Guru berhasil ditambahkan!');
+        renderSettings();
+      }
+    }
+
+    let editingTeacherIndex = null;
+
+    function showEditTeacherForm(index) {
+      editingTeacherIndex = index;
+      const teacher = settings.teachers[index];
+      
+      document.getElementById('teacherFormContainer').classList.remove('hidden');
+      document.getElementById('teacherName').value = teacher.name;
+      document.getElementById('teacherNip').value = teacher.nip;
+      
+      // Change form title and submit handler
+      document.querySelector('#teacherFormContainer h4').textContent = 'Edit Data Guru';
+      const form = document.querySelector('#teacherFormContainer form');
+      form.onsubmit = handleEditTeacher;
+      
+      // Scroll to form
+      document.getElementById('teacherFormContainer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function handleEditTeacher(event) {
+      event.preventDefault();
+      const name = document.getElementById('teacherName').value.trim();
+      const nip = document.getElementById('teacherNip').value.trim();
+      
+      if (name && nip && editingTeacherIndex !== null) {
+        settings.teachers[editingTeacherIndex].name = name;
+        settings.teachers[editingTeacherIndex].nip = nip;
+        
+        // Update classes that use this teacher
+        const teacherId = settings.teachers[editingTeacherIndex].id;
+        classes.forEach(cls => {
+          if (cls.teacherId === teacherId) {
+            cls.teacherName = name;
+            cls.teacherNip = nip;
+          }
+        });
+        
+        saveSettings();
+        saveToLocalStorage();
+        showNotification('✓ Data guru berhasil diperbarui!');
+        editingTeacherIndex = null;
+        hideAddTeacherForm();
         renderSettings();
       }
     }
@@ -2537,5 +2700,5 @@
 
     renderApp();
   </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9ad3768b422a9cd4',t:'MTc2NTYwNzk1My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9ae55952f1a2fd33',t:'MTc2NTc5NTUwMC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
